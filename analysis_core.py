@@ -1,11 +1,13 @@
 """
-Static analysis core for StaticLens Webhook Finder.
+Static analysis core for PharaohLens Webhook Finder.
 Performs safe, non-executing inspection of files to extract metadata and potential exfiltration endpoints.
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
+from binascii import Error as BinasciiError
 from pathlib import Path
 from typing import Dict, List
 
@@ -76,6 +78,63 @@ def extract_strings(data: bytes, max_items: int = 5000) -> List[str]:
     return combined
 
 
+def _try_base64_decode(text: str) -> str | None:
+    cleaned = text.strip()
+    if len(cleaned) < 12 or len(cleaned) > 2048:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9+/=]+", cleaned):
+        return None
+    if len(cleaned) % 4 != 0:
+        return None
+    try:
+        decoded = base64.b64decode(cleaned, validate=True)
+    except (BinasciiError, ValueError):
+        return None
+    if not decoded:
+        return None
+    try:
+        text_val = decoded.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if sum(1 for c in text_val if c.isprintable()) / max(len(text_val), 1) < 0.8:
+        return None
+    return text_val
+
+
+def _try_hex_decode(text: str) -> str | None:
+    cleaned = text.strip().replace(" ", "")
+    if len(cleaned) < 16 or len(cleaned) % 2 != 0:
+        return None
+    if not re.fullmatch(r"[0-9a-fA-F]+", cleaned):
+        return None
+    try:
+        decoded = bytes.fromhex(cleaned)
+    except ValueError:
+        return None
+    if not decoded:
+        return None
+    try:
+        text_val = decoded.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if sum(1 for c in text_val if c.isprintable()) / max(len(text_val), 1) < 0.8:
+        return None
+    return text_val
+
+
+def enrich_with_decoded_strings(strings: List[str]) -> List[Dict[str, str]]:
+    enriched: List[Dict[str, str]] = []
+    for s in strings:
+        enriched.append({"value": s, "source": "plain"})
+        decoded = _try_base64_decode(s)
+        if decoded and decoded not in (entry["value"] for entry in enriched):
+            enriched.append({"value": decoded, "source": "decoded (base64)"})
+        decoded_hex = _try_hex_decode(s)
+        if decoded_hex and decoded_hex not in (entry["value"] for entry in enriched):
+            enriched.append({"value": decoded_hex, "source": "decoded (hex)"})
+    return enriched
+
+
 def _confidence_for_endpoint(value: str, is_webhook: bool = False, has_keyword: bool = False) -> str:
     if is_webhook:
         return "High"
@@ -93,7 +152,11 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
     }
     seen = set()
 
-    for s in strings:
+    enriched_strings = enrich_with_decoded_strings(strings)
+
+    for item in enriched_strings:
+        s = item["value"]
+        source = item.get("source", "plain")
         has_keyword = any(keyword.lower() in s.lower() for keyword in SUSPICIOUS_KEYWORDS)
 
         for match in DISCORD_WEBHOOK_RE.findall(s):
@@ -102,6 +165,7 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
                 results["Discord Webhooks"].append({
                     "value": match,
                     "confidence": _confidence_for_endpoint(match, is_webhook=True),
+                    "source": source,
                 })
 
         for match in TELEGRAM_RE.findall(s):
@@ -110,6 +174,7 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
                 results["Other URLs"].append({
                     "value": match,
                     "confidence": _confidence_for_endpoint(match, has_keyword=has_keyword),
+                    "source": source,
                 })
 
         for match in PASTE_HOST_RE.findall(s):
@@ -118,6 +183,7 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
                 results["Other URLs"].append({
                     "value": match,
                     "confidence": _confidence_for_endpoint(match, has_keyword=has_keyword),
+                    "source": source,
                 })
 
         for match in GENERIC_URL_RE.findall(s):
@@ -126,6 +192,7 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
                 results["Other URLs"].append({
                     "value": match,
                     "confidence": _confidence_for_endpoint(match, has_keyword=has_keyword),
+                    "source": source,
                 })
 
         for match in IPV4_RE.findall(s):
@@ -134,10 +201,11 @@ def find_endpoints(strings: List[str]) -> Dict[str, List[Dict[str, str]]]:
                 results["IPs"].append({
                     "value": match,
                     "confidence": _confidence_for_endpoint(match, has_keyword=has_keyword),
+                    "source": source,
                 })
 
         if has_keyword:
-            results["Suspicious Keywords"].append({"value": s, "confidence": "Medium"})
+            results["Suspicious Keywords"].append({"value": s, "confidence": "Medium", "source": source})
 
     return results
 
@@ -269,6 +337,7 @@ __all__ = [
     "extract_strings",
     "extract_ascii_strings",
     "extract_utf16le_strings",
+    "enrich_with_decoded_strings",
     "DISCORD_WEBHOOK_RE",
     "GENERIC_URL_RE",
     "IPV4_RE",

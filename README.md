@@ -1,6 +1,6 @@
-# StaticLens Webhook Finder
+# PharaohLens Webhook Finder
 
-StaticLens Webhook Finder is a defensive desktop tool for malware responders to statically triage files and locate potential exfiltration endpoints (with a focus on Discord webhooks). The application **never executes samples** and only performs byte-level inspection.
+PharaohLens Webhook Finder is a defensive desktop tool for malware responders to statically triage files and locate potential exfiltration endpoints (with a focus on Discord webhooks). The application **never executes samples** and only performs byte-level inspection.
 
 ## Features
 
@@ -8,6 +8,7 @@ StaticLens Webhook Finder is a defensive desktop tool for malware responders to 
 - Sidebar of scanned items; selecting an item shows its analysis
 - Tabs for summary metadata, endpoints, strings, hex preview, and entrypoint disassembly
 - Endpoint extractor detects Discord webhooks, generic URLs, IPv4 addresses, Telegram bot endpoints, and common paste/C2 hosts
+- Automatic decoding for common encodings (Base64 and hex) to surface concealed endpoints without executing anything
 - Confidence scoring (High/Medium/Low) for endpoints
 - Export findings to JSON (path, metadata, endpoints, top strings)
 - Progress feedback during folder scans via a worker thread (non-blocking UI)
@@ -45,7 +46,7 @@ pytest
 ### Building a standalone binary (PyInstaller)
 ```bash
 pip install pyinstaller
-pyinstaller --name StaticLens --onefile --windowed main.py
+pyinstaller --name PharaohLens --onefile --windowed main.py
 ```
 The resulting executable appears in the `dist/` directory.
 

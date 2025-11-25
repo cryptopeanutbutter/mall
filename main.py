@@ -19,7 +19,7 @@ class DropArea(QtWidgets.QLabel):
     fileDropped = QtCore.Signal(list)
 
     def __init__(self):
-        super().__init__("Drop file or folder here")
+        super().__init__("Drop suspicious file or folder onto PharaohLens")
         self.setAlignment(QtCore.Qt.AlignCenter)
         self.setStyleSheet(
             """
@@ -103,7 +103,7 @@ class AnalysisWorker(QtCore.QThread):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("StaticLens Webhook Finder")
+        self.setWindowTitle("PharaohLens Webhook Finder")
         self.resize(1200, 800)
         self.results: Dict[str, dict] = {}
 
@@ -162,6 +162,9 @@ class MainWindow(QtWidgets.QMainWindow):
         endpoint_layout.addLayout(search_layout)
 
         self.endpoint_list = QtWidgets.QListWidget()
+        self.endpoint_list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.endpoint_list.customContextMenuRequested.connect(self.show_endpoint_menu)
+        self.endpoint_list.itemDoubleClicked.connect(self.view_endpoint_details)
         endpoint_layout.addWidget(self.endpoint_list)
         self.tabs.addTab(endpoint_container, "Endpoints")
 
@@ -270,8 +273,10 @@ class MainWindow(QtWidgets.QMainWindow):
             for entry in values:
                 value = entry.get("value")
                 confidence = entry.get("confidence", "Unknown")
-                item = QtWidgets.QListWidgetItem(f"[{confidence}] {group}: {value}")
-                item.setData(QtCore.Qt.UserRole, value)
+                source = entry.get("source", "plain")
+                entry_with_group = {**entry, "group": group}
+                item = QtWidgets.QListWidgetItem(f"[{confidence}] {group} ({source}): {value}")
+                item.setData(QtCore.Qt.UserRole, entry_with_group)
                 self.endpoint_list.addItem(item)
 
     def filter_endpoints(self, text: str):
@@ -283,7 +288,32 @@ class MainWindow(QtWidgets.QMainWindow):
         item = self.endpoint_list.currentItem()
         if not item:
             return
-        QtWidgets.QApplication.clipboard().setText(item.data(QtCore.Qt.UserRole))
+        entry = item.data(QtCore.Qt.UserRole) or {}
+        QtWidgets.QApplication.clipboard().setText(entry.get("value", ""))
+
+    def show_endpoint_menu(self, position: QtCore.QPoint):
+        item = self.endpoint_list.itemAt(position)
+        if not item:
+            return
+        self.endpoint_list.setCurrentItem(item)
+        menu = QtWidgets.QMenu(self)
+        copy_action = menu.addAction("Copy endpoint")
+        view_action = menu.addAction("View details")
+        action = menu.exec(self.endpoint_list.mapToGlobal(position))
+        if action == copy_action:
+            self.copy_endpoint()
+        elif action == view_action:
+            self.view_endpoint_details(item)
+
+    def view_endpoint_details(self, item: QtWidgets.QListWidgetItem):
+        entry = item.data(QtCore.Qt.UserRole) or {}
+        lines = [
+            f"Value: {entry.get('value', '')}",
+            f"Group: {entry.get('group', 'Unknown')}",
+            f"Confidence: {entry.get('confidence', 'Unknown')}",
+            f"Source: {entry.get('source', 'plain')}",
+        ]
+        QtWidgets.QMessageBox.information(self, "Endpoint details", "\n".join(lines))
 
     def populate_strings(self, result: dict):
         self.string_list.clear()

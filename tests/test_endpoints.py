@@ -1,3 +1,4 @@
+import base64
 import sys
 from pathlib import Path
 
@@ -51,3 +52,12 @@ def test_endpoint_confidence_levels():
     other_urls = endpoints["Other URLs"]
     assert any(e["confidence"] == "Medium" for e in other_urls)
     assert any(e["confidence"] == "Low" for e in other_urls)
+
+
+def test_base64_decoding_surfaces_webhook():
+    raw_webhook = "https://discord.com/api/webhooks/123456789012345/" + ("c" * 24)
+    encoded = base64.b64encode(raw_webhook.encode()).decode()
+    endpoints = find_endpoints([encoded])
+    webhook = endpoints["Discord Webhooks"][0]
+    assert webhook["value"] == raw_webhook
+    assert webhook.get("source") == "decoded (base64)"
