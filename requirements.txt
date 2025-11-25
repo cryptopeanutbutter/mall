@@ -1,0 +1,6 @@
+PySide6
+lief
+pefile
+pyelftools
+capstone
+pytest
